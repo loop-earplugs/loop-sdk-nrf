@@ -24,6 +24,8 @@
 #include "le_audio.h"
 #include "le_audio_rx.h"
 
+#include "audio_datapath.h"
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main, CONFIG_MAIN_LOG_LEVEL);
 
@@ -122,6 +124,7 @@ static void button_msg_sub_thread(void)
 			break;
 
 		case BUTTON_4:
+		#if 0 //Original code
 			if (IS_ENABLED(CONFIG_AUDIO_TEST_TONE)) {
 				if (IS_ENABLED(CONFIG_WALKIE_TALKIE_DEMO)) {
 					LOG_DBG("Test tone is disabled in walkie-talkie mode");
@@ -140,10 +143,13 @@ static void button_msg_sub_thread(void)
 
 				break;
 			}
-
+		#else
+			audio_datapath_delay_increase(10); //Add 10ms
+		#endif
 			break;
 
 		case BUTTON_5:
+		#if 0 //Original code
 			if (IS_ENABLED(CONFIG_AUDIO_MUTE)) {
 				ret = bt_r_and_c_volume_mute(false);
 				if (ret) {
@@ -152,7 +158,9 @@ static void button_msg_sub_thread(void)
 
 				break;
 			}
-
+		#else
+			audio_datapath_delay_decrease(10);
+		#endif
 			break;
 
 		default:

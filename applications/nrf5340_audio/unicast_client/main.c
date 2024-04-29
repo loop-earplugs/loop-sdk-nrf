@@ -22,6 +22,8 @@
 #include "unicast_client.h"
 #include "le_audio_rx.h"
 
+#include "audio_datapath.h"
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main, CONFIG_MAIN_LOG_LEVEL);
 
@@ -158,6 +160,7 @@ static void button_msg_sub_thread(void)
 			break;
 
 		case BUTTON_4:
+	#if 0
 			if (IS_ENABLED(CONFIG_AUDIO_TEST_TONE)) {
 				if (IS_ENABLED(CONFIG_WALKIE_TALKIE_DEMO)) {
 					LOG_DBG("Test tone is disabled in walkie-talkie mode");
@@ -176,19 +179,39 @@ static void button_msg_sub_thread(void)
 
 				break;
 			}
+	#else
+			audio_datapath_delay_increase(10); //Add extra delay
 
+			// audio_datapath_pres_delay_us_get(&demo_var_pres_delay); //Read presentation delay
+			// demo_var_pres_delay += 1000; //Add 1ms
+			// if(demo_var_pres_delay > CONFIG_AUDIO_MAX_PRES_DLY_US) //Check limit
+			// {
+			// 	demo_var_pres_delay = CONFIG_AUDIO_MIN_PRES_DLY_US; //Reset to minimum
+			// }
+			// audio_datapath_pres_delay_us_set(demo_var_pres_delay);
+	#endif
 			break;
 
 		case BUTTON_5:
+	#if 0
 			if (IS_ENABLED(CONFIG_AUDIO_MUTE)) {
 				ret = bt_r_and_c_volume_mute(false);
 				if (ret) {
 					LOG_WRN("Failed to mute, ret: %d", ret);
 				}
-
 				break;
 			}
 
+	#else
+			audio_datapath_delay_decrease(10);
+			// audio_datapath_pres_delay_us_get(&demo_var_pres_delay); //Read presentation delay
+			// demo_var_pres_delay -= 1000; //Subtract 1ms
+			// if(demo_var_pres_delay < CONFIG_AUDIO_MIN_PRES_DLY_US) //Check limit
+			// {
+			// 	demo_var_pres_delay = CONFIG_AUDIO_MAX_PRES_DLY_US; //Reset to maximum
+			// }
+			// audio_datapath_pres_delay_us_set(demo_var_pres_delay);
+	#endif
 			break;
 
 		default:

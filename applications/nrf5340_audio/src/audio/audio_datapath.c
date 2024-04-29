@@ -58,6 +58,9 @@ LOG_MODULE_REGISTER(audio_datapath, CONFIG_AUDIO_DATAPATH_LOG_LEVEL);
 /* Decrement sample FIFO index by one block */
 #define PREV_IDX(i) (((i) > 0) ? ((i)-1) : (FIFO_NUM_BLKS - 1))
 
+/* Increment sample FIFO delayed index by one block */
+#define NEXT_IDX_DELAYED(i) (((i) < ((FIFO_NUM_BLKS * 2) - 1)) ? ((i) + 1) : 0)
+
 #define NUM_BLKS_IN_FRAME      NUM_BLKS(CONFIG_AUDIO_FRAME_DURATION_US)
 #define BLK_MONO_NUM_SAMPS     BLK_SIZE_SAMPLES(CONFIG_AUDIO_SAMPLE_RATE_HZ)
 #define BLK_STEREO_NUM_SAMPS   (BLK_MONO_NUM_SAMPS * 2)
@@ -140,6 +143,19 @@ static struct {
 		/* Statistics */
 		uint32_t total_blk_underruns;
 	} out;
+
+    struct {
+#if CONFIG_AUDIO_BIT_DEPTH_16
+		int16_t __aligned(sizeof(uint32_t)) fifo[MAX_FIFO_SIZE * 2];
+#elif CONFIG_AUDIO_BIT_DEPTH_32
+		int32_t __aligned(sizeof(uint32_t)) fifo[MAX_FIFO_SIZE * 2];
+#endif
+		uint16_t prod_blk_idx; /* Output producer audio block index */
+		uint16_t cons_blk_idx; /* Output consumer audio block index */
+		uint32_t prod_blk_ts[FIFO_NUM_BLKS * 2];
+		/* Statistics */
+		uint32_t total_blk_underruns;
+	} out_delayed;
 
 	uint32_t prev_drift_sdu_ref_us;
 	uint32_t prev_pres_sdu_ref_us;
@@ -883,6 +899,71 @@ void audio_datapath_pres_delay_us_get(uint32_t *delay_us)
 	*delay_us = ctrl_blk.pres_comp.pres_delay_us;
 }
 
+#define MAX_DELAY_MS 100
+
+static bool new_delay = false;
+static uint32_t current_delay_ms = 0;
+
+static void audio_datapath_delay_set(uint32_t delay_ms)
+{
+    new_delay = true;
+    current_delay_ms = delay_ms;
+}
+
+void audio_datapath_delay_increase(uint32_t inc_ms)
+{
+	//Limit delay
+	if(current_delay_ms >= MAX_DELAY_MS)
+	{
+		return;
+	}
+
+    current_delay_ms += inc_ms;
+
+    if(current_delay_ms > MAX_DELAY_MS)
+    {
+        current_delay_ms = MAX_DELAY_MS;
+    }
+
+    audio_datapath_delay_set(current_delay_ms);
+}
+
+void audio_datapath_delay_decrease(uint32_t dec_ms)
+{
+	if(current_delay_ms == 0)
+	{
+		return;
+	}
+
+    if(current_delay_ms >= dec_ms)
+    {
+        current_delay_ms -= dec_ms;
+    }
+    else
+    {
+        current_delay_ms = 0;
+    }
+    audio_datapath_delay_set(current_delay_ms);
+}
+
+
+static void audio_datapath_update_delay(uint32_t delay_ms)
+{
+    //Calculate samples for delay_ms
+    uint32_t delay_samples = delay_ms * CONFIG_AUDIO_SAMPLE_RATE_HZ * CONFIG_AUDIO_BIT_DEPTH_OCTETS * 2 / 1000;
+    //Calculate blocks for delay_ms
+    uint32_t delay_blk = delay_samples / BLK_STEREO_SIZE_OCTETS;
+
+    //Empty buffer
+    memset(ctrl_blk.out_delayed.fifo, 0, sizeof(ctrl_blk.out_delayed.fifo));
+    //Reset consumer
+    ctrl_blk.out_delayed.cons_blk_idx = 0;
+
+    //Update difference between producer and consumer with new delay (move producer ahead of consumer)
+    ctrl_blk.out_delayed.prod_blk_idx = ctrl_blk.out_delayed.cons_blk_idx + delay_blk;
+}
+
+
 void audio_datapath_stream_out(const uint8_t *buf, size_t size, uint32_t sdu_ref_us, bool bad_frame,
 			       uint32_t recv_frame_ts_us)
 {
@@ -970,9 +1051,56 @@ void audio_datapath_stream_out(const uint8_t *buf, size_t size, uint32_t sdu_ref
 		/* Discard frame to allow consumer to catch up */
 		return;
 	}
-
+	
 	uint32_t out_blk_idx = ctrl_blk.out.prod_blk_idx;
 
+#if 1
+	//Introduce variable delay
+    if(new_delay == true)
+    {
+        //Update delay
+        audio_datapath_update_delay(current_delay_ms);
+        new_delay = false;
+    }
+#endif
+
+    uint32_t out_delayed_blk_idx = ctrl_blk.out_delayed.prod_blk_idx;
+    uint32_t out_delayed_cons_blk_idx = ctrl_blk.out_delayed.cons_blk_idx;
+
+    //Copy data to delay buffer
+    for (uint32_t i = 0; i < NUM_BLKS_IN_FRAME; i++) {
+		if (IS_ENABLED(CONFIG_AUDIO_BIT_DEPTH_16)) {
+			memcpy(&ctrl_blk.out_delayed.fifo[out_delayed_blk_idx * BLK_STEREO_NUM_SAMPS],
+			       &((int16_t *)ctrl_blk.decoded_data)[i * BLK_STEREO_NUM_SAMPS],
+			       BLK_STEREO_SIZE_OCTETS);
+		} else if (IS_ENABLED(CONFIG_AUDIO_BIT_DEPTH_32)) {
+			memcpy(&ctrl_blk.out_delayed.fifo[out_delayed_blk_idx * BLK_STEREO_NUM_SAMPS],
+			       &((int32_t *)ctrl_blk.decoded_data)[i * BLK_STEREO_NUM_SAMPS],
+			       BLK_STEREO_SIZE_OCTETS);
+		}
+		/* Record producer block start reference */
+		ctrl_blk.out_delayed.prod_blk_ts[out_delayed_blk_idx] = recv_frame_ts_us + (i * BLK_PERIOD_US);
+
+		out_delayed_blk_idx = NEXT_IDX_DELAYED(out_delayed_blk_idx);
+	}
+
+	ctrl_blk.out_delayed.prod_blk_idx = out_delayed_blk_idx;
+
+    //Copy delayed data to output buffer
+    for (uint32_t i = 0; i < NUM_BLKS_IN_FRAME; i++) {
+        memcpy(&ctrl_blk.out.fifo[out_blk_idx * BLK_STEREO_NUM_SAMPS],
+                    &ctrl_blk.out_delayed.fifo[out_delayed_cons_blk_idx * BLK_STEREO_NUM_SAMPS],
+                    BLK_STEREO_SIZE_OCTETS);
+
+        /* Record producer block start reference */
+		ctrl_blk.out.prod_blk_ts[out_blk_idx] = recv_frame_ts_us + (i * BLK_PERIOD_US);
+
+		out_blk_idx = NEXT_IDX(out_blk_idx);
+
+		out_delayed_cons_blk_idx = NEXT_IDX_DELAYED(out_delayed_cons_blk_idx);
+	}
+
+#if 0 //Original code
 	for (uint32_t i = 0; i < NUM_BLKS_IN_FRAME; i++) {
 		if (IS_ENABLED(CONFIG_AUDIO_BIT_DEPTH_16)) {
 			memcpy(&ctrl_blk.out.fifo[out_blk_idx * BLK_STEREO_NUM_SAMPS],
@@ -983,14 +1111,15 @@ void audio_datapath_stream_out(const uint8_t *buf, size_t size, uint32_t sdu_ref
 			       &((int32_t *)ctrl_blk.decoded_data)[i * BLK_STEREO_NUM_SAMPS],
 			       BLK_STEREO_SIZE_OCTETS);
 		}
-
 		/* Record producer block start reference */
 		ctrl_blk.out.prod_blk_ts[out_blk_idx] = recv_frame_ts_us + (i * BLK_PERIOD_US);
 
 		out_blk_idx = NEXT_IDX(out_blk_idx);
 	}
+#endif
 
 	ctrl_blk.out.prod_blk_idx = out_blk_idx;
+	ctrl_blk.out_delayed.cons_blk_idx = out_delayed_cons_blk_idx;
 }
 
 int audio_datapath_start(struct data_fifo *fifo_rx)

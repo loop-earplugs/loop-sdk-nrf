@@ -87,4 +87,18 @@ int audio_datapath_stop(void);
  */
 int audio_datapath_init(void);
 
+/**
+ * @brief Increase the audio datapath delay
+ * 
+ * @param inc_ms Latency increment in milliseconds
+ */
+void audio_datapath_delay_increase(uint32_t inc_ms);
+
+/**
+ * @brief Decrease the audio datapath delay
+ * 
+ * @param dec_ms Latency decrement in milliseconds
+ */
+void audio_datapath_delay_decrease(uint32_t dec_ms);
+
 #endif /* _AUDIO_DATAPATH_H_ */
