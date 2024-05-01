@@ -78,6 +78,20 @@ config PRINT_STACK_USAGE_MS
 endmenu # Log levels
 
 #----------------------------------------------------------------------------#
+
+#----------------------------------------------------------------------------#
+menu "Loop Demo Modes"
+
+config LOOP_VAR_DELAY_DEMO
+	bool "Enables or disable variable delay demo mode"
+	default y
+	help
+	  This option enables or disables the variable delay demo mode.
+	  When enabled, buttons 4 and 5 are used to respectively increase or decrease the audio
+	  delay of the received audio. The delay is changed in steps of 10 ms, between 40ms and 140ms.
+endmenu # Loop Demo Modes
+
+#----------------------------------------------------------------------------#
 endif # NRF5340_AUDIO
 
 source "Kconfig.zephyr"

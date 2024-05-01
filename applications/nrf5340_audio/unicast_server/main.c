@@ -125,43 +125,45 @@ static void button_msg_sub_thread(void)
 			break;
 
 		case BUTTON_4:
-		#if 0 //Original code
-			if (IS_ENABLED(CONFIG_AUDIO_TEST_TONE)) {
-				if (IS_ENABLED(CONFIG_WALKIE_TALKIE_DEMO)) {
-					LOG_DBG("Test tone is disabled in walkie-talkie mode");
-					break;
-				}
-
-				if (strm_state != STATE_STREAMING) {
-					LOG_WRN("Not in streaming state");
-					break;
-				}
-
-				ret = audio_system_encode_test_tone_step();
-				if (ret) {
-					LOG_WRN("Failed to play test tone, ret: %d", ret);
-				}
-
-				break;
+			if (IS_ENABLED(CONFIG_LOOP_VAR_DELAY_DEMO)) {
+				audio_datapath_delay_increase(10); //Increase delay
 			}
-		#else
-			audio_datapath_delay_increase(10); //Add 10ms
-		#endif
+			else
+			{
+				if (IS_ENABLED(CONFIG_AUDIO_TEST_TONE)) {
+					if (IS_ENABLED(CONFIG_WALKIE_TALKIE_DEMO)) {
+						LOG_DBG("Test tone is disabled in walkie-talkie mode");
+						break;
+					}
+
+					if (strm_state != STATE_STREAMING) {
+						LOG_WRN("Not in streaming state");
+						break;
+					}
+
+					ret = audio_system_encode_test_tone_step();
+					if (ret) {
+						LOG_WRN("Failed to play test tone, ret: %d", ret);
+					}
+
+					break;
+				}
+			}
 			break;
 
 		case BUTTON_5:
-		#if 0 //Original code
-			if (IS_ENABLED(CONFIG_AUDIO_MUTE)) {
-				ret = bt_rend_volume_mute(false);
-				if (ret) {
-					LOG_WRN("Failed to mute, ret: %d", ret);
-				}
-
-				break;
+			if (IS_ENABLED(CONFIG_LOOP_VAR_DELAY_DEMO)) {
+				audio_datapath_delay_decrease(10); //Decrease delay
 			}
-		#else
-			audio_datapath_delay_decrease(10);
-		#endif
+			else {
+				if (IS_ENABLED(CONFIG_AUDIO_MUTE)) {
+					ret = bt_rend_volume_mute(false);
+					if (ret) {
+						LOG_WRN("Failed to mute, ret: %d", ret);
+					}
+					break;
+				}
+			}
 			break;
 
 		default:
